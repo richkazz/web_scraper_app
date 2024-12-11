@@ -19,14 +19,52 @@ class WebScraperApp extends StatelessWidget {
         primarySwatch: Colors.brown,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const WebScraperHomePage(),
+      home: const App(),
     );
   }
 }
 
-class WebScraperHomePage extends StatefulWidget {
-  const WebScraperHomePage({super.key});
+class App extends StatefulWidget {
+  const App({super.key});
 
+  @override
+  State<App> createState() => _AppState();
+}
+
+class _AppState extends State<App> with TickerProviderStateMixin {
+  late TabController tabController;
+  @override
+  void initState() {
+    tabController = TabController(length: 4, vsync: this);
+    super.initState();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+        body: TabBarView(
+      controller: tabController,
+      children: const [
+        WebScraperHomePage(
+          currentIndex: 1,
+        ),
+        WebScraperHomePage(
+          currentIndex: 2,
+        ),
+        WebScraperHomePage(
+          currentIndex: 3,
+        ),
+        WebScraperHomePage(
+          currentIndex: 4,
+        ),
+      ],
+    ));
+  }
+}
+
+class WebScraperHomePage extends StatefulWidget {
+  const WebScraperHomePage({required this.currentIndex, super.key});
+  final int currentIndex;
   @override
   _WebScraperHomePageState createState() => _WebScraperHomePageState();
 }
@@ -38,12 +76,14 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
   String _errorMessage = '';
   late SharedPreferences prefs;
 
-  static const String urlKey = 'url_key';
-  static const String contentKey = 'content_key';
+  static String urlKey = 'url_key';
+  static String contentKey = 'content_key';
 
   @override
   void initState() {
     super.initState();
+    urlKey = 'url_key${widget.currentIndex}';
+    contentKey = 'content_key${widget.currentIndex}';
     _initiate();
   }
 
@@ -72,7 +112,7 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
     try {
       final response = await http.get(Uri.parse(_urlController.text));
       if (response.statusCode == 200) {
-        _processResponse(response.body);
+        await _processResponse(response.body);
       } else {
         throw Exception('Failed to load webpage');
       }
@@ -83,12 +123,12 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
     }
   }
 
-  void _processResponse(String responseBody) {
+  Future<void> _processResponse(String responseBody) async {
     final document = parse(responseBody);
     final extractedText = _extractText(document, responseBody);
     final nextPageUrl = _extractNextPageUrl(document);
 
-    _updateStateWithExtractedData(extractedText, nextPageUrl);
+    await _updateStateWithExtractedData(extractedText, nextPageUrl);
   }
 
   String _extractText(document, String responseBody) {
@@ -120,7 +160,7 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
     return '$baseUrl/$thirdATagHref';
   }
 
-  void _updateStateWithExtractedData(
+  Future<void> _updateStateWithExtractedData(
       String extractedText, String nextPageUrl) async {
     _urlController.text = nextPageUrl;
     await prefs.setString(urlKey, nextPageUrl);
@@ -158,7 +198,7 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Web Scraper'),
+        title: Text('Page ${widget.currentIndex}'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
