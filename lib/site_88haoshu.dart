@@ -1,78 +1,19 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' show parse;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_scraper_app/site_88haoshu.dart';
-import 'package:web_scraper_app/translate.dart';
 
-void main() {
-  runApp(const WebScraperApp());
-}
-
-class WebScraperApp extends StatelessWidget {
-  const WebScraperApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Web Scraper',
-      theme: ThemeData(
-        primarySwatch: Colors.brown,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: const App(),
-    );
-  }
-}
-
-class App extends StatefulWidget {
-  const App({super.key});
-
-  @override
-  State<App> createState() => _AppState();
-}
-
-class _AppState extends State<App> with TickerProviderStateMixin {
-  late TabController tabController;
-  @override
-  void initState() {
-    tabController = TabController(length: 5, vsync: this);
-    super.initState();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-        body: TabBarView(
-      controller: tabController,
-      children: const [
-        WebScraperHomePage(
-          currentIndex: 1,
-        ),
-        WebScraperHomePage(
-          currentIndex: 2,
-        ),
-        WebScraperHomePage88haoshu(
-          currentIndex: 3,
-        ),
-        WebScraperHomePage88haoshu(
-          currentIndex: 4,
-        ),
-        TranslationScreen(),
-      ],
-    ));
-  }
-}
-
-class WebScraperHomePage extends StatefulWidget {
-  const WebScraperHomePage({required this.currentIndex, super.key});
+class WebScraperHomePage88haoshu extends StatefulWidget {
+  const WebScraperHomePage88haoshu({required this.currentIndex, super.key});
   final int currentIndex;
   @override
   _WebScraperHomePageState createState() => _WebScraperHomePageState();
 }
 
-class _WebScraperHomePageState extends State<WebScraperHomePage> {
+class _WebScraperHomePageState extends State<WebScraperHomePage88haoshu> {
   final TextEditingController _urlController = TextEditingController();
   String _extractedText = '';
   bool _isLoading = false;
@@ -136,31 +77,21 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
 
   String _extractText(document, String responseBody) {
     final builder = StringBuffer();
-    final titleElement = document.querySelector('strong');
-    final title = titleElement?.text;
-    builder.writeAll([title, '\n']);
+    final contentElement = document.querySelector('article');
+    final content = contentElement?.text;
 
-    var split = responseBody.split('<br>');
-    split = split.sublist(1, split.length - 2)
-      ..removeWhere((element) => element.trim().isEmpty)
-      ..removeWhere((element) =>
-          element.trim().startsWith('<div') ||
-          element.trim().startsWith('<img'));
-
-    for (var element in split) {
-      builder.writeAll([element.trim().substring(13), '\n']);
-    }
+    builder.writeAll([content]);
 
     return builder.toString();
   }
 
   String _extractNextPageUrl(document) {
-    final brElements = document.querySelectorAll('nav');
-    final thirdATag = brElements.first.children;
-    final thirdATagHref = thirdATag[2].attributes['href'];
+    final brElements = document.getElementById('next_url');
+    final thirdATagHref = brElements.attributes['href'] as String;
+    final indexOfLastSlashForNext = thirdATagHref.lastIndexOf('/');
     final indexOfLastSlash = _urlController.text.lastIndexOf('/');
     final baseUrl = _urlController.text.substring(0, indexOfLastSlash);
-    return '$baseUrl/$thirdATagHref';
+    return '$baseUrl/${thirdATagHref.substring(indexOfLastSlashForNext + 1)}';
   }
 
   Future<void> _updateStateWithExtractedData(
@@ -201,7 +132,7 @@ class _WebScraperHomePageState extends State<WebScraperHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Page ${widget.currentIndex}'),
+        title: Text('88haoshu ${widget.currentIndex}'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
