@@ -1,5 +1,3 @@
-import 'dart:developer';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -54,12 +52,19 @@ class _WebScraperHomePageState extends State<WebScraperHomePage88haoshu> {
     _setLoadingState(true);
 
     try {
-      final response = await http.get(Uri.parse(_urlController.text));
-      if (response.statusCode == 200) {
-        await _processResponse(response.body);
-      } else {
-        throw Exception('Failed to load webpage');
+      final builder = StringBuffer();
+      for (int i = 0; i < 2; i++) {
+        final response = await http.get(Uri.parse(_urlController.text));
+        if (response.statusCode == 200) {
+          final (extractedText, nextPageUrl) =
+              await _processResponse(response.body);
+          builder.writeAll([extractedText, '\n']);
+        } else {
+          throw Exception('Failed to load webpage');
+        }
       }
+      await _updateStateWithExtractedData(
+          builder.toString(), _urlController.text);
     } catch (e) {
       _setError(e.toString());
     } finally {
@@ -67,12 +72,11 @@ class _WebScraperHomePageState extends State<WebScraperHomePage88haoshu> {
     }
   }
 
-  Future<void> _processResponse(String responseBody) async {
+  Future<(String, String)> _processResponse(String responseBody) async {
     final document = parse(responseBody);
-    final extractedText = _extractText(document, responseBody);
     final nextPageUrl = _extractNextPageUrl(document);
-
-    await _updateStateWithExtractedData(extractedText, nextPageUrl);
+    _urlController.text = nextPageUrl;
+    return (_extractText(document, responseBody), nextPageUrl);
   }
 
   String _extractText(document, String responseBody) {
