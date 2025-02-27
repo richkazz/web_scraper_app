@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert'; // For jsonEncode
 import 'package:flutter/services.dart'; // For Clipboard
+import 'package:google_generative_ai/google_generative_ai.dart';
 
 class TranslationScreen extends StatefulWidget {
   const TranslationScreen({super.key});
@@ -13,6 +14,10 @@ class _TranslationScreenState extends State<TranslationScreen> {
   final TextEditingController _chineseController = TextEditingController();
   final TextEditingController _englishController = TextEditingController();
   final List<Map<String, String>> _translations = [];
+  final model = GenerativeModel(
+    model: 'gemini-2.0-flash-exp',
+    apiKey: 'AIzaSyAiXmCBEdiqCJ_j_vZKsA-zioCHNtzGoZM',
+  );
 
   void _addTranslation() {
     final chineseText = _chineseController.text;

@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  google_generative_ai: ^0.4.6
   html: ^0.15.5
   http: ^1.2.2
   shared_preferences: ^2.3.3
