@@ -23,7 +23,7 @@ class _WebScraperHomePageState extends State<WebScraperHomePage88haoshu> {
   final model = GenerativeModel(
     systemInstruction: Content.system(systemInstruction),
     model: 'gemini-2.0-flash-exp',
-    apiKey: 'AIzaSyAiXmCBEdiqCJ_j_vZKsA-zioCHNtzGoZM',
+    apiKey: '',
   );
   static String urlKey = 'url_key';
   static String contentKey = 'content_key';
