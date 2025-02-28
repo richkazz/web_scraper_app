@@ -16,7 +16,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
   final List<Map<String, String>> _translations = [];
   final model = GenerativeModel(
     model: 'gemini-2.0-flash-exp',
-    apiKey: '',
+    apiKey: 'AIzaSyAiXmCBEdiqCJ_j_vZKsA-zioCHNtzGoZM',
   );
 
   void _addTranslation() {

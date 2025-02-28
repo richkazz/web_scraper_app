@@ -1,11 +1,11 @@
 import 'dart:async';
+import 'dart:math' show max, min;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:http/http.dart' as http;
-import 'package:html/parser.dart' show parse;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_scraper_app/scraper_service.dart';
 import 'package:web_scraper_app/site_88haoshu.dart';
 
 void main() {
@@ -13,16 +13,55 @@ void main() {
 }
 
 class ScraperApp extends StatelessWidget {
-  const ScraperApp({Key? key}) : super(key: key);
+  const ScraperApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Web Scraper',
+      title: 'Novel Reader',
       theme: ThemeData(
-        primarySwatch: Colors.brown,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.indigo,
+          brightness: Brightness.light,
+        ),
+        textTheme: GoogleFonts.nunitoSansTextTheme(),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.indigo, width: 2),
+          ),
+        ),
       ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.indigo,
+          brightness: Brightness.dark,
+        ),
+        textTheme: GoogleFonts.nunitoSansTextTheme(
+          ThemeData(brightness: Brightness.dark).textTheme,
+        ),
+      ),
+      themeMode: ThemeMode.system,
       home: const MainScreen(),
     );
   }
@@ -39,8 +78,14 @@ class _MainScreenState extends State<MainScreen>
   late TabController _tabController;
 
   final List<Tab> _tabs = const [
-    Tab(text: 'Star Odyssey'),
-    Tab(text: 'Page 2'),
+    Tab(
+      icon: Icon(Icons.book_outlined),
+      text: 'Novel 1',
+    ),
+    Tab(
+      icon: Icon(Icons.auto_stories_outlined),
+      text: 'Novel 2',
+    ),
   ];
 
   @override
@@ -59,17 +104,77 @@ class _MainScreenState extends State<MainScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Web Scraper'),
+        title: const Text(
+          'Novel Reader',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        centerTitle: true,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () {
+              // Show settings dialog
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Settings'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.text_fields),
+                        title: const Text('Text Size'),
+                        trailing: DropdownButton<String>(
+                          value: 'Medium',
+                          onChanged: (_) {},
+                          items: ['Small', 'Medium', 'Large']
+                              .map((size) => DropdownMenuItem(
+                                    value: size,
+                                    child: Text(size),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Auto-translate'),
+                        subtitle: const Text('Translate content automatically'),
+                        value: false,
+                        onChanged: (_) {},
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: _tabs,
+          indicatorSize: TabBarIndicatorSize.label,
+          indicatorWeight: 3,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: const [
-          ScraperPage(pageIndex: 1),
-          ScraperPage(pageIndex: 2),
+          ScraperPage(
+            pageIndex: 1,
+            systemInstruction: systemInstruction,
+          ),
+          ScraperPage(
+            pageIndex: 2,
+            systemInstruction: systemInstruction,
+          ),
         ],
       ),
     );
@@ -78,297 +183,722 @@ class _MainScreenState extends State<MainScreen>
 
 class ScraperPage extends StatefulWidget {
   final int pageIndex;
-  const ScraperPage({Key? key, required this.pageIndex}) : super(key: key);
+  final String systemInstruction;
+
+  const ScraperPage({
+    Key? key,
+    required this.pageIndex,
+    required this.systemInstruction,
+  }) : super(key: key);
 
   @override
-  _ScraperPageState createState() => _ScraperPageState();
+  State<ScraperPage> createState() => _ScraperPageState();
 }
 
-class _ScraperPageState extends State<ScraperPage> {
-  final TextEditingController _urlController = TextEditingController();
-  String _extractedContent = '';
-  bool _isLoading = false;
-  String _errorMessage = '';
-  late SharedPreferences _prefs;
+class _ScraperPageState extends State<ScraperPage>
+    with AutomaticKeepAliveClientMixin {
+  late ScraperService _service;
+  bool _isFullscreen = false;
+  double _fontSize = 16.0;
 
-  late String _urlKey;
-  late String _contentKey;
-  late String _historyKey;
-  List<String> _contentHistory = [];
-  final GenerativeModel _generativeModel = GenerativeModel(
-    systemInstruction: Content.system(systemInstruction),
-    model: 'gemini-2.0-flash-exp',
-    apiKey: '',
-  );
-
-  final StreamController<String> _aiStreamController =
-      StreamController<String>.broadcast();
-  final StringBuffer _translationBuffer = StringBuffer();
-  bool _isTranslating = false;
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _urlKey = 'url_key${widget.pageIndex}';
-    _contentKey = 'content_key${widget.pageIndex}';
-    _historyKey = 'history_key${widget.pageIndex}';
-
-    _initializePreferences();
+    _service = ScraperService(
+      pageIndex: widget.pageIndex,
+      systemInstruction: widget.systemInstruction,
+    );
+    _initService();
   }
 
-  Future<void> _initializePreferences() async {
-    _prefs = await SharedPreferences.getInstance();
-    _loadSavedData();
-  }
-
-  void _loadSavedData() {
-    final savedUrl = _prefs.getString(_urlKey);
-    _urlController.text = savedUrl ?? '';
-    final savedContent = _prefs.getString(_contentKey);
-    setState(() {
-      _extractedContent = savedContent ?? '';
-    });
-    _contentHistory = _prefs.getStringList(_historyKey) ?? [];
-    _contentHistory = _contentHistory.isEmpty
-        ? history
-            .map((content) => content.parts.first is TextPart
-                ? (content.parts.first as TextPart).text
-                : '')
-            .toList()
-        : _contentHistory;
-  }
-
-  Future<void> _fetchAndExtractContent() async {
-    if (_urlController.text.isEmpty) {
-      _setError('Please enter a URL');
-      return;
-    }
-    _setLoadingState(true);
-
-    try {
-      final response = await http.get(Uri.parse(_urlController.text));
-      if (response.statusCode == 200) {
-        await _processResponse(response.body);
-      } else {
-        throw Exception('Failed to load webpage');
-      }
-    } catch (error) {
-      _setError(error.toString());
-    } finally {
-      _setLoadingState(false);
-    }
-  }
-
-  Future<void> _processResponse(String responseBody) async {
-    final document = parse(responseBody);
-    final extractedContent = _extractContent(document, responseBody);
-    final nextPageUrl = _extractNextPageUrl(document);
-
-    await _updateContent(extractedContent, nextPageUrl);
-  }
-
-  String _extractContent(document, String responseBody) {
-    final buffer = StringBuffer();
-    final titleElement = document.querySelector('strong');
-    final title = titleElement?.text ?? '';
-    buffer.writeln(title);
-
-    List<String> lines = responseBody.split('<br>');
-    if (lines.length > 3) {
-      lines = lines.sublist(1, lines.length - 2)
-        ..removeWhere((line) =>
-            line.trim().isEmpty ||
-            line.trim().startsWith('<div') ||
-            line.trim().startsWith('<img'));
-    }
-
-    for (var line in lines) {
-      String trimmed = line.trim();
-      if (trimmed.length > 13) {
-        buffer.writeln(trimmed.substring(13));
-      } else {
-        buffer.writeln(trimmed);
-      }
-    }
-    return buffer.toString();
-  }
-
-  String _extractNextPageUrl(document) {
-    final navElements = document.querySelectorAll('nav');
-    if (navElements.isNotEmpty && navElements.first.children.length >= 3) {
-      final thirdAnchor = navElements.first.children[2];
-      final thirdAnchorHref = thirdAnchor.attributes['href'] ?? '';
-      final lastSlashIndex = _urlController.text.lastIndexOf('/');
-      final baseUrl = lastSlashIndex != -1
-          ? _urlController.text.substring(0, lastSlashIndex)
-          : _urlController.text;
-      return '$baseUrl/$thirdAnchorHref';
-    }
-    return _urlController.text;
-  }
-
-  Future<void> _updateContent(String content, String nextPageUrl) async {
-    _urlController.text = nextPageUrl;
-    await _prefs.setString(_urlKey, nextPageUrl);
-    setState(() {
-      _extractedContent = content;
-    });
-    await _prefs.setString(_contentKey, content);
-  }
-
-  void _setLoadingState(bool isLoading) {
-    setState(() {
-      _isLoading = isLoading;
-      if (isLoading) {
-        _errorMessage = '';
-        _extractedContent = '';
-      }
-    });
-  }
-
-  void _setError(String message) {
-    setState(() {
-      _errorMessage = message;
-      _isLoading = false;
+  Future<void> _initService() async {
+    await _service.initializePreferences();
+    _service.addListener(() {
+      if (mounted) setState(() {});
     });
   }
 
   void _copyContentToClipboard() {
-    if (_extractedContent.isNotEmpty) {
-      Clipboard.setData(ClipboardData(text: _extractedContent));
+    if (_service.extractedContent.isNotEmpty) {
+      Clipboard.setData(ClipboardData(text: _service.extractedContent));
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Content copied to clipboard!')),
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Text('Content copied to clipboard!'),
+            ],
+          ),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          backgroundColor: Colors.indigo,
+          duration: const Duration(seconds: 2),
+        ),
       );
     }
   }
 
-  void _translateContentToEnglish() {
-    history = List.generate(
-        _contentHistory.length,
-        (index) => index % 2 != 0
-            ? Content.model([TextPart(_contentHistory[index])])
-            : Content.text(_contentHistory[index]));
-    if (_extractedContent.isEmpty) return;
+  void _showSavedNovelsModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(20),
+        ),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Saved Novels',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.add),
+                    onPressed: () {
+                      // Option to manually add a novel
+                      _showAddNovelDialog(context);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _service.savedNovels.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(20.0),
+                        child: Text(
+                          'No saved novels yet. Browse a novel and it will be saved automatically.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
+                  : Container(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.5,
+                      ),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _service.savedNovels.length,
+                        separatorBuilder: (context, index) => const Divider(),
+                        itemBuilder: (context, index) {
+                          final novel = _service.savedNovels[index];
+                          return Dismissible(
+                            key: Key(novel.url),
+                            background: Container(
+                              color: Colors.red,
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 20.0),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
+                            ),
+                            direction: DismissDirection.endToStart,
+                            onDismissed: (direction) {
+                              _service.deleteNovel(novel.url);
+                              setState(() {}); // Update the modal UI
+                            },
+                            child: ListTile(
+                              leading: const Icon(Icons.book),
+                              title: Text(novel.title),
+                              subtitle: Text(
+                                novel.url,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing:
+                                  const Icon(Icons.arrow_forward_ios, size: 16),
+                              onTap: () {
+                                // Load the selected novel
+                                Navigator.pop(context);
+                                _service.loadNovel(novel.url);
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAddNovelDialog(BuildContext context) {
+    final titleController = TextEditingController();
+    final urlController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Novel'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(
+                labelText: 'Novel Title',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: urlController,
+              decoration: const InputDecoration(
+                labelText: 'Novel URL',
+                border: OutlineInputBorder(),
+                hintText: 'https://example.com/novel/123',
+              ),
+              keyboardType: TextInputType.url,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (urlController.text.isNotEmpty) {
+                final novel = SavedNovel(
+                  title: titleController.text.isNotEmpty
+                      ? titleController.text
+                      : 'Untitled Novel',
+                  url: urlController.text,
+                  lastVisited: DateTime.now(),
+                );
+
+                // Find existing novel with same URL
+                final existingIndex =
+                    _service.savedNovels.indexWhere((n) => n.url == novel.url);
+
+                if (existingIndex >= 0) {
+                  // Update existing
+                  _service.savedNovels[existingIndex] = novel;
+                } else {
+                  // Add new
+                  _service.savedNovels.add(novel);
+                }
+
+                _service.saveSavedNovelsList();
+                Navigator.pop(context);
+
+                // Force update of modal
+                setState(() {});
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleFullscreen() {
     setState(() {
-      _isTranslating = true;
-    });
-    _translationBuffer.clear();
-    history.add(Content.text(_extractedContent));
-    _generativeModel.generateContentStream(history).listen((event) {
-      _translationBuffer.write('${event.text}\n');
-      _aiStreamController.add(_translationBuffer.toString());
-    }).onDone(() {
-      history.add(Content.model([TextPart(_translationBuffer.toString())]));
-      if (history.length == 12) {
-        history.removeAt(0);
-        history.removeAt(0);
-      }
-      _contentHistory = history
-          .map((content) => content.parts.first is TextPart
-              ? (content.parts.first as TextPart).text
-              : '')
-          .toList();
-      unawaited(_prefs.setStringList(_historyKey, _contentHistory));
+      _isFullscreen = !_isFullscreen;
     });
   }
 
   @override
   void dispose() {
-    _aiStreamController.close();
-    _urlController.dispose();
+    _service.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        children: [
-          _buildUrlInputField(),
-          const SizedBox(height: 16),
-          _buildActionButtons(),
-          const SizedBox(height: 16),
-          Expanded(child: _buildContentDisplay()),
+    super.build(context);
+
+    return _isFullscreen
+        ? _buildFullscreenReader()
+        : Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                _buildUrlInputField(),
+                const SizedBox(height: 16),
+                _buildActionButtons(),
+                const SizedBox(height: 16),
+                Expanded(child: _buildContentDisplay()),
+              ],
+            ),
+          );
+  }
+
+  Widget _buildFullscreenReader() {
+    return Scaffold(
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? Colors.black
+          : Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.fullscreen_exit),
+            onPressed: _toggleFullscreen,
+          ),
+          IconButton(
+            icon: const Icon(Icons.text_decrease),
+            onPressed: () {
+              setState(() {
+                _fontSize = max(12.0, _fontSize - 1.0);
+              });
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.text_increase),
+            onPressed: () {
+              setState(() {
+                _fontSize = min(4.0, _fontSize + 1.0);
+              });
+            },
+          ),
         ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SingleChildScrollView(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: _service.isTranslating
+                  ? StreamBuilder<String>(
+                      stream: _service.aiStreamController.stream,
+                      builder: (context, snapshot) {
+                        return Text(
+                          snapshot.data ?? '',
+                          style: TextStyle(
+                            fontSize: _fontSize,
+                            height: 1.5,
+                            letterSpacing: 0.3,
+                          ),
+                        );
+                      },
+                    )
+                  : Text(
+                      _service.extractedContent,
+                      style: TextStyle(
+                        fontSize: _fontSize,
+                        height: 1.5,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+            ),
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildUrlInputField() {
-    return TextField(
-      controller: _urlController,
-      decoration: InputDecoration(
-        labelText: 'Enter URL',
-        border: const OutlineInputBorder(),
-        suffixIcon: IconButton(
-          icon: const Icon(Icons.clear),
-          onPressed: () => _urlController.clear(),
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _service.urlController,
+                decoration: const InputDecoration(
+                  labelText: 'Enter novel URL',
+                  hintText: 'https://...',
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.go,
+                onSubmitted: (_) async {
+                  await _service.fetchAndExtractContent();
+                  setState(() {});
+                },
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.book),
+              onPressed: _showSavedNovelsModal,
+              tooltip: 'Saved Novels',
+            ),
+            IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () => _service.urlController.clear(),
+              tooltip: 'Clear URL',
+            ),
+          ],
         ),
       ),
-      keyboardType: TextInputType.url,
     );
   }
 
   Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: IconButton(
-            onPressed: _fetchAndExtractContent,
-            icon: const Icon(Icons.navigate_next),
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: ListenableBuilder(
+            listenable: _service,
+            builder: (context, child) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildActionButton(
+                    icon: Icons.navigate_next,
+                    label: 'Next Chapter',
+                    onPressed: () async {
+                      await _service.fetchAndExtractContent();
+                      setState(() {});
+                    },
+                    isLoading: _service.isLoading,
+                  ),
+                  _buildActionButton(
+                    icon: Icons.copy,
+                    label: 'Copy Text',
+                    onPressed: _copyContentToClipboard,
+                    isEnabled: _service.extractedContent.isNotEmpty,
+                  ),
+                  _buildActionButton(
+                    icon: Icons.translate,
+                    label: 'Translate',
+                    onPressed: () {
+                      _service.translateContentToEnglish();
+                      setState(() {});
+                    },
+                    isEnabled: _service.extractedContent.isNotEmpty,
+                    isActive: _service.isTranslating,
+                  ),
+                  _buildActionButton(
+                    icon: Icons.fullscreen,
+                    label: 'Reader Mode',
+                    onPressed: _toggleFullscreen,
+                    isEnabled: _service.extractedContent.isNotEmpty,
+                  ),
+                ],
+              );
+            }),
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    bool isEnabled = true,
+    bool isLoading = false,
+    bool isActive = false,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Expanded(
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: isEnabled ? onPressed : null,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  isLoading
+                      ? SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colorScheme.primary,
+                          ),
+                        )
+                      : Icon(
+                          icon,
+                          color: isEnabled
+                              ? (isActive
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurface)
+                              : colorScheme.onSurface.withOpacity(0.3),
+                        ),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isEnabled
+                          ? (isActive
+                              ? colorScheme.primary
+                              : colorScheme.onSurface)
+                          : colorScheme.onSurface.withOpacity(0.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: IconButton(
-            onPressed: _copyContentToClipboard,
-            icon: const Icon(Icons.copy),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: IconButton(
-            onPressed: _translateContentToEnglish,
-            icon: const Icon(Icons.translate),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
   Widget _buildContentDisplay() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    } else if (_errorMessage.isNotEmpty) {
+    if (_service.isLoading) {
       return Center(
-        child: Text(_errorMessage, style: const TextStyle(color: Colors.red)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 16),
+            const Text('Loading chapter content...'),
+          ],
+        ),
       );
-    } else if (_extractedContent.isNotEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    } else if (_service.errorMessage.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Error',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _service.errorMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () async {
+                await _service.fetchAndExtractContent();
+                setState(() {});
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+            ),
+          ],
+        ),
+      );
+    } else if (_service.extractedContent.isNotEmpty) {
+      return Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.book,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Chapter Content',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  if (_service.isTranslating)
+                    Chip(
+                      label: const Text('Translated'),
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      labelStyle: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontSize: 12,
+                      ),
+                      padding: EdgeInsets.zero,
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: _service.isTranslating
+                    ? StreamBuilder<String>(
+                        stream: _service.aiStreamController.stream,
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  CircularProgressIndicator(),
+                                  SizedBox(height: 16),
+                                  Text('Translating...'),
+                                ],
+                              ),
+                            );
+                          }
+                          return Text(
+                            snapshot.data ?? '',
+                            style: TextStyle(
+                              fontSize: _fontSize,
+                              height: 1.5,
+                              letterSpacing: 0.3,
+                            ),
+                          );
+                        },
+                      )
+                    : Text(
+                        _service.extractedContent,
+                        style: TextStyle(
+                          fontSize: _fontSize,
+                          height: 1.5,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Empty state
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text(
-            'Extracted Content:',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          Icon(
+            Icons.auto_stories,
+            size: 64,
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Enter a URL to start reading',
+            style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          Expanded(
-            child: SingleChildScrollView(
-              child: _isTranslating
-                  ? StreamBuilder<String>(
-                      stream: _aiStreamController.stream,
-                      builder: (context, snapshot) {
-                        return Text(snapshot.data ?? '');
-                      },
-                    )
-                  : Text(_extractedContent),
+          Text(
+            'Load a novel chapter by entering its URL',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: 200,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                // Show example URLs
+                showModalBottomSheet(
+                  context: context,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
+                  ),
+                  builder: (context) => Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Supported Sites',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        ListTile(
+                          leading: const Icon(Icons.link),
+                          title: const Text('88haoshu.com'),
+                          subtitle: const Text('Chinese Novels'),
+                          trailing:
+                              const Icon(Icons.arrow_forward_ios, size: 16),
+                          onTap: () {
+                            _service.urlController.text =
+                                'https://m.88haoshu.com/example';
+                            Navigator.pop(context);
+                          },
+                        ),
+                        const Divider(),
+                        ListTile(
+                          leading: const Icon(Icons.link),
+                          title: const Text('44xw.com'),
+                          subtitle: const Text('Chinese Novels'),
+                          trailing:
+                              const Icon(Icons.arrow_forward_ios, size: 16),
+                          onTap: () {
+                            _service.urlController.text =
+                                'https://44xw.com/example';
+                            Navigator.pop(context);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.help_outline),
+              label: const Text('Example URLs'),
             ),
           ),
         ],
-      );
-    }
-    return const SizedBox.shrink();
+      ),
+    );
   }
 }
 
